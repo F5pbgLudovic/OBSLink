@@ -1,0 +1,15 @@
+# Liste blanche : seul le code et la doc publique partent sur GitHub / whitelist only
+/*
+!/.gitignore
+!/README.md
+!/LICENSE
+!/THIRD-PARTY-NOTICES.md
+!/CMakeLists.txt
+!/build.ps1
+!/src
+!/data
+!/dep
+!/stubs
+!/resources
+!/installer
+!/tools
