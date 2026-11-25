@@ -2,6 +2,8 @@
 #include "track-mixer.h"
 #include "helpers.h"
 #include <regex>
+#include <QMenu>
+#include <QWidgetAction>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -287,6 +289,7 @@ class PushWidgetImpl : public PushWidget, public IOBSOutputEventHanlder
     OutputTargetConfigPtr config_;
 
     QPushButton* btn_ = 0;
+    QPushButton* snd_ = 0; // OBSLink : coupure du son par source, utilisable en direct
     QLabel* name_ = 0;
     QLabel* msg_ = 0;
     QLabel* status_dot_ = 0;
@@ -668,7 +671,8 @@ class PushWidgetImpl : public PushWidget, public IOBSOutputEventHanlder
             if (trackIdx == 0) {
                 route_.reset();
                 auto ac = GlobalMultiOutputConfig().FindAudioConfig(*config_->audioConfig);
-                if (ac && !ac->mutedSources.empty())
+                // piste privee toujours reservee : permet de couper une source en plein direct
+                if (ac)
                     route_ = obslink::AcquireRoute(ac->id, ac->mutedSources);
             }
             OBSEncoderAutoRelease enc = obs_get_encoder_by_name(AudioEncoderName(trackIdx).c_str());
@@ -915,7 +919,11 @@ public:
         layout->addWidget(titleWidget, 0, 1);
 
         // Start/Stop shares the title row, pushed to the right edge.
-        layout->addWidget(btn_ = new QPushButton(obs_module_text("Btn.Start"), this), 0, 2);
+        layout->addWidget(snd_ = new QPushButton(QString::fromUtf8("\xE2\x99\xAA"), this), 0, 2);
+        snd_->setToolTip(QString::fromUtf8(obs_module_text("Sound.ButtonTip")));
+        snd_->setFixedWidth(30);
+        QObject::connect(snd_, &QPushButton::clicked, [this]() { ShowSourceMuteMenu(); });
+        layout->addWidget(btn_ = new QPushButton(obs_module_text("Btn.Start"), this), 0, 3);
         QObject::connect(btn_, &QPushButton::clicked, [this]() {
             StartStop();
         });
@@ -934,7 +942,7 @@ public:
 
         // Message text: keep it from soaking up spare height, otherwise the
         // item grows taller than its content.
-        layout->addWidget(msg_ = new QLabel(u8"", this), 1, 0, 1, 3);
+        layout->addWidget(msg_ = new QLabel(u8"", this), 1, 0, 1, 4);
         msg_->setWordWrap(true);
         msg_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
 
@@ -1079,6 +1087,47 @@ public:
 
         // Start is asynchronous: keep the flag set until OnStarted()/OnStopped() clears it.
         resetStarting.Dismiss();
+    }
+
+    // OBSLink : menu Â« Son dÃ©sactivÃ© Â» par source, modifiable pendant le direct (effet immediat, sans couper la sortie).
+    void ShowSourceMuteMenu()
+    {
+        QMenu menu(this);
+        auto ac = (config_->audioConfig.has_value() && !IsSpecialEncoder(*config_->audioConfig))
+            ? GlobalMultiOutputConfig().FindAudioConfig(*config_->audioConfig) : nullptr;
+        if (!ac) {
+            auto a = menu.addAction(QString::fromUtf8(obs_module_text("Sound.NeedOwnEncoder")));
+            a->setEnabled(false);
+            menu.exec(QCursor::pos());
+            return;
+        }
+        auto title = menu.addAction(QString::fromUtf8(obs_module_text("Sound.MenuTitle")));
+        title->setEnabled(false);
+        auto acId = ac->id;
+        for (const auto& s : obslink::ListAudioSources()) {
+            auto cb = new QCheckBox(QString::fromUtf8(s.name), &menu);
+            cb->setStyleSheet("QCheckBox { padding: 3px 10px; }");
+            const auto& muted = ac->mutedSources;
+            cb->setChecked(std::find(muted.begin(), muted.end(), s.name) != muted.end());
+            std::string name = s.name;
+            QObject::connect(cb, &QCheckBox::toggled, [this, acId, name](bool on) {
+                auto cfg = GlobalMultiOutputConfig().FindAudioConfig(acId);
+                if (!cfg) return;
+                auto& v = cfg->mutedSources;
+                v.erase(std::remove(v.begin(), v.end(), name), v.end());
+                if (on) v.push_back(name);
+                if (route_) route_->SetMuted(v); // immediat, meme pendant le live
+                SaveMultiOutputConfig();
+            });
+            auto wa = new QWidgetAction(&menu);
+            wa->setDefaultWidget(cb);
+            menu.addAction(wa);
+        }
+        if (IsBusy() && !route_) {
+            auto a = menu.addAction(QString::fromUtf8(obs_module_text("Sound.NoRoute")));
+            a->setEnabled(false);
+        }
+        menu.exec(QCursor::pos());
     }
 
     void StopStreaming() override {

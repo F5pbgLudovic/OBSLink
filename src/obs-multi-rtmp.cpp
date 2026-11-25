@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 #include <list>
 #include <regex>
@@ -20,6 +20,7 @@
 
 #include "push-widget.h"
 #include "track-mixer.h"
+#include "chat-docks.h"
 #include "edit-targets-dialog.h"
 #include "plugin-support.h"
 
@@ -747,6 +748,8 @@ bool obs_module_load()
         return false;
     }
 
+    obslink::CreateChatDocks();
+
     obs_hotkey_register_frontend(
         "obs-multi-rtmp.start_all",
         obs_module_text("Hotkey.StartAllTargets"),
@@ -781,8 +784,14 @@ bool obs_module_load()
             for(auto x: dock->GetAllPushWidgets())
                 x->OnOBSEvent(event);
 
+            if (event == obs_frontend_event::OBS_FRONTEND_EVENT_FINISHED_LOADING)
+                obslink::OnChatDocksFinishedLoading();
+
             if (event == obs_frontend_event::OBS_FRONTEND_EVENT_FINISHED_LOADING || event == obs_frontend_event::OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED)
                 obslink::RepairInterruptedRoutes();
+
+            if (event == obs_frontend_event::OBS_FRONTEND_EVENT_EXIT)
+                obslink::OnChatDocksExit();
 
             if (event == obs_frontend_event::OBS_FRONTEND_EVENT_EXIT)
             {   
