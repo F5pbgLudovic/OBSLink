@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OBSLink VERSION 1.0.1 LANGUAGES C CXX)
+project(OBSLink VERSION 1.0.2 LANGUAGES C CXX)
 
 # OBSLink - dérivé de obs-multi-rtmp (SoraYuki, GPL v2). Voir LICENSE-GPL2.txt.
 # Chemins fournis par build.ps1 : OBS_INC (libobs), OBS_FRONTEND_INC, OBS_LIB_DIR (obs.lib, obs-frontend-api.lib), Qt via CMAKE_PREFIX_PATH.

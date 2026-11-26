@@ -77,7 +77,12 @@ static const char* kWatchScript = R"JS(
  try { order = JSON.parse(localStorage.getItem('obslink_recent') || '[]').slice(-400); order.forEach(function(x){ recent[x] = 1; }); } catch (e) { order = []; }
  function check(el){
    var tx = (el.textContent || '').replace(/\s+/g, ' ').trim();
-   if (tx.length < 2 || recent[tx]) return;
+   // Twitch : chaque ligne est un element unique (la meme phrase peut etre ecrite deux fois) ; on memorise l'element, pas le texte
+   // Twitch : une vraie ligne contient « pseudo: texte » ; on ignore les bandeaux (ex. « Nouveautés »)
+   if (isTw && tx.indexOf(':') < 1) return;
+   if (!isKick) { if (tx.length < 2 || el.__obl) return; el.__obl = 1; n++; document.title = 'OBSLINK-MSG-' + n + '|' + tx.slice(0, 100); return; }
+   // kick : un meme texte ne re-sonne qu'apres 8 s (les lignes redessinees par la liste virtuelle ne sonnent pas)
+   if (tx.length < 2 || recent[tx] === 1 || (recent[tx] && Date.now() - recent[tx] < 2000)) return;
    // kick : une vraie ligne contient Â« pseudo: texte Â» ; on ignore les bandeaux de l'interface (ex. Â« Nouveaux messages Â»)
    if (isKick && (tx.indexOf(':') < 1 || /^(Nouveaux? messages?|New messages?)/i.test(tx))) return;
    // kick affiche l'heure (HH:MM) devant chaque ligne : un message de plus de ~75 s est de l'historique
@@ -87,32 +92,40 @@ static const char* kWatchScript = R"JS(
      if (age < 0) age += 86400;
      if (age > 75) { recent[tx] = 1; return; }
    }
-   recent[tx] = 1; order.push(tx);
+   recent[tx] = Date.now(); order.push(tx);
    if (order.length > 400) delete recent[order.shift()];
    try { localStorage.setItem('obslink_recent', JSON.stringify(order)); } catch (e) {}
    n++; document.title = 'OBSLINK-MSG-' + n + '|' + tx.slice(0, 100);
  }
  function isMsg(e){ return e.nodeType === 1 && ((e.matches && e.matches(sel)) || (e.querySelector && e.querySelector(sel))); }
- var isKick = /kick\.com/.test(location.host), seen = {}, nseen = 0, q = [], DEBUG = false, quiet = isKick ? 12000 : 4000;
- if (isKick) sel = 'div[data-index][class*="inset-x-0"]'; // kick : uniquement les lignes de message de la liste
+ var isKick = /kick\.com/.test(location.host), seen = {}, nseen = 0, q = [], DEBUG = false, quiet = isKick ? 12000 : /twitch\.tv/.test(location.host) ? 15000 : 4000;
+ var isTw = /twitch\.tv/.test(location.host), TWC = '.chat-scrollable-area__message-container,[role="log"],.chat-list--default,.chat-list--other';
+ if (/youtube\.com/.test(location.host)) sel = 'yt-live-chat-text-message-renderer,yt-live-chat-paid-message-renderer,yt-live-chat-membership-item-renderer'; // une seule detection par message
+ if (isKick) sel ='div[data-index][class*="inset-x-0"]'; // kick : uniquement les lignes de message de la liste
  function sig(e){
    var a = []; for (var i = 0; i < e.attributes.length && i < 6; i++) a.push(e.attributes[i].name);
    return e.tagName.toLowerCase() + (e.id ? '#' + e.id.slice(0, 20) : '') + '.' + String(e.className && e.className.baseVal === undefined ? e.className : '').slice(0, 60).replace(/\s+/g, '.') + '[' + a.join(',') + ']';
  }
  // diagnostic kick : signatures des elements ajoutes, relues dans le journal d'OBS
- if (isKick && DEBUG) setInterval(function(){ if (q.length) document.title = 'OBSLINK-DBG-' + q.shift(); }, 400);
+ if (/twitch\.tv/.test(location.host)) DEBUG = true; // diagnostic Twitch (pas de son constate le 2026-11-25)
+ if (DEBUG) setInterval(function(){ if (q.length) document.title = 'OBSLINK-DBG-' + q.shift(); }, 400);
  new MutationObserver(function(ms){
    if (Date.now() - t0 < quiet) return;
-   if (isKick && DEBUG) for (var i = 0; i < ms.length; i++) for (var k = 0; k < ms[i].addedNodes.length; k++) {
+   if (DEBUG) for (var i = 0; i < ms.length; i++) for (var k = 0; k < ms[i].addedNodes.length; k++) {
      var e = ms[i].addedNodes[k];
-     if (e.nodeType === 1 && nseen < 30) { var s = sig(e); if (!seen[s]) { seen[s] = 1; nseen++; q.push(s); } }
+     if (e.nodeType === 1 && nseen < 60) { var s = sig(e); if (!seen[s]) { seen[s] = 1; nseen++; q.push(s); } }
    }
    for (var i = 0; i < ms.length; i++) {
      var a = ms[i].addedNodes;
      for (var k = 0; k < a.length; k++) {
        var nd = a[k];
        if (nd.nodeType !== 1) continue;
-       var el = (nd.matches && nd.matches(sel)) ? nd : (nd.querySelector ? nd.querySelector(sel) : null);
+       var el = isTw ? null : ((nd.matches && nd.matches(sel)) ? nd : (nd.querySelector ? nd.querySelector(sel) : null));
+       // Twitch : tout element ajoute dans la liste des messages (conteneur) est une ligne de chat
+       if (!el && isTw && nd.closest) {
+         var ct = nd.closest(TWC);
+         if (ct) { var ln = nd; while (ln.parentElement && ln.parentElement !== ct && !ln.parentElement.matches(TWC)) ln = ln.parentElement; el = ln; }
+       }
        if (el) (function(el){ setTimeout(function(){ check(el); }, 250); })(el);
      }
    }
